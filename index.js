@@ -1,5 +1,5 @@
 const express = require("express");
-const { scrapeFund, getMTSXAUUSD } = require("./scrapeFund");
+const { scrapeFund, getMTSXAUUSD, getSETINETREIT, getSymbolPrice, getUSDTHBCloseByDate } = require("./scrapeFund");
 const { buildOpenApiSpec } = require("./openapi");
 
 const app = express();
@@ -189,6 +189,9 @@ function renderHomePage(baseUrl) {
           <a class="button primary" href="/docs">Open API Docs</a>
           <a class="button secondary" href="/api/fund/kkp-ndq100-uh-e">Try JSON Endpoint</a>
           <a class="button secondary" href="/api/market/xauusd">Try XAUUSD Endpoint</a>
+          <a class="button secondary" href="/api/stock/inetreit">Try INETREIT Endpoint</a>
+          <a class="button secondary" href="/api/price?symbol=BTC">Try Price Endpoint</a>
+          <a class="button secondary" href="/api/usdthb/close?date=20260512">Try USD Close Endpoint</a>
         </div>
       </section>
 
@@ -220,23 +223,265 @@ function renderHomePage(baseUrl) {
 </html>`;
 }
 
-function renderDocsPage() {
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderExample(value) {
+  if (value === undefined) {
+    return "";
+  }
+
+  return `<pre>${escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
+}
+
+function renderDocsPage(spec) {
+  const endpoints = Object.entries(spec.paths)
+    .flatMap(([path, methods]) =>
+      Object.entries(methods).map(([method, operation]) => {
+        const parameters = operation.parameters || [];
+        const successContent = operation.responses?.["200"]?.content?.["application/json"];
+        const example = successContent?.example;
+
+        return `
+        <article class="endpoint">
+          <div class="endpoint-head">
+            <span class="method">${escapeHtml(method.toUpperCase())}</span>
+            <code>${escapeHtml(path)}</code>
+          </div>
+          <h2>${escapeHtml(operation.summary || path)}</h2>
+          ${operation.description ? `<p>${escapeHtml(operation.description)}</p>` : ""}
+          ${
+            parameters.length
+              ? `<h3>Parameters</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>In</th>
+                      <th>Required</th>
+                      <th>Example</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${parameters
+                      .map(
+                        (parameter) => `
+                        <tr>
+                          <td><code>${escapeHtml(parameter.name)}</code></td>
+                          <td>${escapeHtml(parameter.in)}</td>
+                          <td>${parameter.required ? "yes" : "no"}</td>
+                          <td><code>${escapeHtml(parameter.example ?? parameter.schema?.default ?? "")}</code></td>
+                        </tr>`
+                      )
+                      .join("")}
+                  </tbody>
+                </table>`
+              : ""
+          }
+          ${example ? `<h3>Example Response</h3>${renderExample(example)}` : ""}
+        </article>`;
+      })
+    )
+    .join("");
+
   return `<!doctype html>
-<html>
+<html lang="th">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Node Fund API Docs</title>
+    <title>${escapeHtml(spec.info.title)} Docs</title>
     <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f8fa;
+        --panel: #ffffff;
+        --ink: #17202a;
+        --muted: #647084;
+        --line: #dbe1ea;
+        --code: #f3f6fa;
+        --accent: #0f766e;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
-        background: #f8f7f4;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Arial, "Helvetica Neue", sans-serif;
+      }
+
+      main {
+        width: min(1080px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 32px 0 56px;
+      }
+
+      header {
+        display: grid;
+        gap: 10px;
+        padding: 0 0 24px;
+        border-bottom: 1px solid var(--line);
+        margin-bottom: 24px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 4px;
+        font-size: 2rem;
+      }
+
+      h2 {
+        margin-bottom: 8px;
+        font-size: 1.15rem;
+      }
+
+      h3 {
+        margin: 18px 0 8px;
+        font-size: 0.9rem;
+      }
+
+      p {
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      code,
+      pre {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      }
+
+      code {
+        overflow-wrap: anywhere;
+      }
+
+      pre {
+        overflow-x: auto;
+        margin: 0;
+        padding: 14px;
+        border-radius: 8px;
+        background: var(--code);
+        border: 1px solid var(--line);
+        font-size: 0.86rem;
+        line-height: 1.5;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 0 10px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .endpoint {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        margin-bottom: 14px;
+      }
+
+      .endpoint-head {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .method {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 54px;
+        min-height: 28px;
+        padding: 0 8px;
+        border-radius: 6px;
+        background: #e6f4f1;
+        color: #075c54;
+        font-weight: 700;
+        font-size: 0.78rem;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+        border: 1px solid var(--line);
+      }
+
+      th,
+      td {
+        padding: 10px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: var(--code);
+        font-size: 0.82rem;
+      }
+
+      @media (max-width: 680px) {
+        main {
+          width: min(100% - 20px, 1080px);
+          padding-top: 20px;
+        }
+
+        .endpoint {
+          padding: 14px;
+        }
+
+        .endpoint-head {
+          align-items: flex-start;
+          flex-direction: column;
+        }
       }
     </style>
-    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
   </head>
   <body>
-    <redoc spec-url="/openapi.json"></redoc>
+    <main>
+      <header>
+        <h1>${escapeHtml(spec.info.title)}</h1>
+        <p>${escapeHtml(spec.info.description)}</p>
+        <div class="meta">
+          <span class="pill">OpenAPI ${escapeHtml(spec.openapi)}</span>
+          <span class="pill">Version ${escapeHtml(spec.info.version)}</span>
+          <a class="pill" href="/openapi.json">openapi.json</a>
+        </div>
+      </header>
+      ${endpoints}
+    </main>
   </body>
 </html>`;
 }
@@ -249,8 +494,8 @@ app.get("/openapi.json", (req, res) => {
   res.json(buildOpenApiSpec(getBaseUrl(req)));
 });
 
-app.get("/docs", (_req, res) => {
-  res.type("html").send(renderDocsPage());
+app.get("/docs", (req, res) => {
+  res.type("html").send(renderDocsPage(buildOpenApiSpec(getBaseUrl(req))));
 });
 
 app.get("/api/fund/kkp-ndq100-uh-e", async (_req, res) => {
@@ -270,6 +515,55 @@ app.get("/api/market/xauusd", async (_req, res) => {
   if (!result.success) {
     return res.status(500).json(result);
   }
+  return res.json(result);
+});
+
+app.get("/api/stock/inetreit", async (_req, res) => {
+  const result = await getSETINETREIT();
+  if (!result.success) {
+    return res.status(500).json(result);
+  }
+  return res.json(result);
+});
+
+app.get("/api/price", async (req, res) => {
+  const { symbol, targetCurrency } = req.query;
+  const result = await getSymbolPrice(symbol, targetCurrency);
+
+  if (!result.success) {
+    return res.status(symbol ? 500 : 400).json(result);
+  }
+
+  return res.json(result);
+});
+
+app.get("/api/price/:symbol", async (req, res) => {
+  const result = await getSymbolPrice(req.params.symbol, req.query.targetCurrency);
+
+  if (!result.success) {
+    return res.status(500).json(result);
+  }
+
+  return res.json(result);
+});
+
+app.get("/api/usdthb/close", async (req, res) => {
+  const result = await getUSDTHBCloseByDate(req.query.date);
+
+  if (!result.success) {
+    return res.status(req.query.date ? 500 : 400).json(result);
+  }
+
+  return res.json(result);
+});
+
+app.get("/api/usdthb/close/:date", async (req, res) => {
+  const result = await getUSDTHBCloseByDate(req.params.date);
+
+  if (!result.success) {
+    return res.status(500).json(result);
+  }
+
   return res.json(result);
 });
 

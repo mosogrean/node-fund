@@ -1,13 +1,13 @@
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: node-fund:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    image: mosogrean/node-fund:v1.0.1
     container_name: node-fund-api
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "30000:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
